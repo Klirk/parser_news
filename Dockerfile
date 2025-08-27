@@ -1,10 +1,7 @@
-FROM python:3.11-slim
+FROM python:3.12-bookworm
 
 RUN apt-get update && apt-get install -y \
-    gcc \
-    libxml2-dev \
-    libxslt-dev \
-    zlib1g-dev \
+    wget \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -13,8 +10,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN playwright install chromium
-RUN playwright install-deps
+RUN playwright install --with-deps chromium
 
 COPY . .
 

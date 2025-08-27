@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Основне API додаток
   api:
@@ -18,7 +16,8 @@ services:
 
   # MongoDB база даних
   mongo:
-    image: mongo:7.0
+    image: mongo:latest
+    restart: always
     ports:
       - "27017:27017"
     environment:
@@ -27,20 +26,22 @@ services:
       - MONGO_INITDB_DATABASE=parser_db
     volumes:
       - mongo_data:/data/db
-      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+      - mongo-config:/data/configdb
     networks:
       - parser_network
 
   # MongoDB Express (веб-інтерфейс для MongoDB)
   mongo-express:
-    image: mongo-express:1.0.0
+    image: mongo-express:latest
     ports:
       - "8081:8081"
     environment:
       - ME_CONFIG_MONGODB_ADMINUSERNAME=admin
       - ME_CONFIG_MONGODB_ADMINPASSWORD=password123
       - ME_CONFIG_MONGODB_URL=mongodb://admin:password123@mongo:27017/
-      - ME_CONFIG_BASICAUTH=false
+      - ME_CONFIG_BASICAUTH=true
+      - ME_CONFIG_BASICAUTH_USERNAME=admin
+      - ME_CONFIG_BASICAUTH_PASSWORD=admin
     depends_on:
       - mongo
     networks:
@@ -48,7 +49,9 @@ services:
 
 volumes:
   mongo_data:
-
+    driver: local
+  mongo-config:
+    driver: local
 networks:
   parser_network:
     driver: bridge
