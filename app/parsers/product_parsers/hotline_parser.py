@@ -70,7 +70,16 @@ class HotlineParser(BaseParser, IProductParser):
                     headers=self.session_headers,
                     follow_redirects=True
             ) as client:
-                x_token = await self._initialize_session(client, url)
+                # Получаем x-token и проверяем валидность URL через urlTypeDefiner
+                url_info = await self._get_url_type_and_token(client, path)
+                if not url_info:
+                    raise ValueError(f"Не удалось получить информацию о товаре для path: {path}")
+                
+                if url_info['type'] != "product-regular":
+                    raise ValueError(f"URL не является страницей товара. Тип: {url_info['type']}")
+                
+                x_token = url_info['token']
+                self.logger.info(f"Получен x-token: {x_token[:20]}... (тип: {url_info['type']})")
 
                 offers_data = await self._get_offers_via_graphql(client, path, x_token, url)
 
@@ -93,33 +102,36 @@ class HotlineParser(BaseParser, IProductParser):
 
     async def _extract_path_from_url(self, url: str) -> Optional[str]:
         """
-        Извлекает path товара из URL hotline.ua
+        Извлекает path товара из URL hotline.ua для использования в GraphQL
+        
+        Примеры:
+        https://hotline.ua/ua/sport-ryukzaki/ar/ -> /sport-ryukzaki/ar/
+        https://hotline.ua/mobile/apple-iphone-15/123456/ -> /mobile/apple-iphone-15/123456/
         """
         try:
             clean_url = url.split('?')[0].split('#')[0]
-            patterns = [
-                r'/([^/]+)/?$',  # Последний сегмент URL
-                r'/([^/]+)/$',  # Последний сегмент с обязательным слешем
-                r'/([a-zA-Z0-9-_]+)/?$',  # Альфанумерический последний сегмент
-            ]
-
-            for pattern in patterns:
-                match = re.search(pattern, clean_url)
-                if match:
-                    path = match.group(1)
-                    if path not in ['ua', 'uk', 'ru', 'en']:
-                        return path
-
-            segments = [s for s in clean_url.split('/') if s]
-            if len(segments) >= 2:
-                potential_path = segments[-1]
-                if potential_path and potential_path not in ['ua', 'uk', 'ru', 'en']:
-                    return potential_path
-                elif len(segments) >= 2:
-                    potential_path = segments[-2]
-                    if potential_path and potential_path not in ['ua', 'uk', 'ru', 'en']:
-                        return potential_path
-
+            
+            # Убираем домен и протокол
+            if "hotline.ua" in clean_url:
+                # Находим позицию после hotline.ua
+                domain_pos = clean_url.find("hotline.ua") + len("hotline.ua")
+                path_part = clean_url[domain_pos:]
+                
+                # Убираем языковые префиксы /ua/, /uk/, /ru/, /en/
+                if path_part.startswith('/ua/'):
+                    path_part = path_part[3:]  # Убираем /ua
+                elif path_part.startswith('/uk/'):
+                    path_part = path_part[3:]  # Убираем /uk  
+                elif path_part.startswith('/ru/'):
+                    path_part = path_part[3:]  # Убираем /ru
+                elif path_part.startswith('/en/'):
+                    path_part = path_part[3:]  # Убираем /en
+                
+                # Проверяем что остался валидный путь
+                if path_part and len(path_part) > 1:
+                    self.logger.debug(f"Извлечен path: {path_part} из URL: {url}")
+                    return path_part
+            
             return None
 
         except Exception as e:
@@ -181,8 +193,12 @@ class HotlineParser(BaseParser, IProductParser):
         }
         """
 
+        # Для getOffers используем только имя товара (последний сегмент path)
+        # Например, из "/sport-ryukzaki/ar/" берем "ar"
+        product_path = path.strip('/').split('/')[-1] if path else ""
+        
         variables = {
-            "path": path,
+            "path": product_path,
             "cityId": 370
         }
 
@@ -221,7 +237,6 @@ class HotlineParser(BaseParser, IProductParser):
                 return []
 
             try:
-                self.logger.info(f"Полный ответ GraphQL {data}")
                 product_data = data["data"]["byPathQueryProduct"]
                 if not product_data:
                     self.logger.warning(f"Товар не найден для path: {path}")
@@ -468,62 +483,86 @@ class HotlineParser(BaseParser, IProductParser):
             self.logger.warning(f"Ошибка очистки URL {url}: {str(e)}")
             return url.split('?')[0].split('#')[0]
 
-    async def _initialize_session(self, client: httpx.AsyncClient, product_url: str) -> str:
+    async def _get_url_type_and_token(self, client: httpx.AsyncClient, path: str) -> Optional[Dict[str, str]]:
         """
-        Инициализирует сессию и извлекает x-token для GraphQL запросов
+        Получает x-token и информацию о типе URL через GraphQL API urlTypeDefiner
         
+        Args:
+            client: HTTP клиент
+            path: Путь товара (например, "/sport-ryukzaki/ar/")
+            
         Returns:
-            str: x-token для авторизации GraphQL запросов
+            Dict[str, str]: Словарь с полями token, type, state или None при ошибке
         """
+        query = """
+        query urlTypeDefiner($path: String!) {
+          urlTypeDefiner(path: $path) {
+            redirectTo
+            state
+            token
+            type
+            pathForDuplicateCatalog
+            __typename
+          }
+        }
+        """
+        
+        variables = {
+            "path": path
+        }
+        
+        payload = {
+            "operationName": "urlTypeDefiner",
+            "variables": variables,
+            "query": query
+        }
+        
         try:
-            self.logger.info(f"Инициализируем сессию для {product_url}")
-
-            response = await client.get(product_url)
-            if response.status_code == 200:
-                self.logger.info("Сессия инициализирована успешно")
-
-                x_token = self._extract_x_token(response.text)
-                if x_token:
-                    self.logger.info(f"Получен x-token: {x_token[:20]}... (длина: {len(x_token)})")
-                    return x_token
-                else:
-                    self.logger.warning("Не удалось извлечь x-token из страницы")
-                    self.logger.debug(f"HTML содержимое (первые 500 символов): {response.text[:500]}")
-                    return ""
-            else:
-                self.logger.warning(f"Не удалось инициализировать сессию: {response.status_code}")
-                return ""
-
+            self.logger.info(f"Получаем x-token через urlTypeDefiner для path: {path}")
+            self.logger.debug(f"urlTypeDefiner payload: {payload}")
+            
+            response = await client.post(
+                self.graphql_url,
+                json=payload,
+                headers=self.session_headers
+            )
+            
+            if response.status_code != 200:
+                self.logger.error(f"urlTypeDefiner запрос вернул статус {response.status_code}: {response.text}")
+                return None
+            
+            data = response.json()
+            
+            if "errors" in data:
+                self.logger.error(f"urlTypeDefiner ошибки: {data['errors']}")
+                return None
+            
+            try:
+                url_definer = data["data"]["urlTypeDefiner"]
+                if not url_definer:
+                    self.logger.warning(f"urlTypeDefiner не вернул данные для path: {path}")
+                    return None
+                
+                result = {
+                    'token': url_definer.get('token', ''),
+                    'type': url_definer.get('type', ''),
+                    'state': url_definer.get('state', ''),
+                    'redirectTo': url_definer.get('redirectTo', '')
+                }
+                
+                self.logger.info(f"urlTypeDefiner результат: type={result['type']}, state={result['state']}")
+                return result
+                
+            except (KeyError, TypeError) as e:
+                self.logger.error(f"Ошибка парсинга ответа urlTypeDefiner: {str(e)}")
+                self.logger.debug(f"Ответ urlTypeDefiner: {data}")
+                return None
+                
         except Exception as e:
-            self.logger.warning(f"Ошибка инициализации сессии: {str(e)}")
-            return ""
+            self.logger.error(f"Ошибка выполнения urlTypeDefiner запроса: {str(e)}")
+            return None
 
-    @staticmethod
-    def _extract_x_token(html_content: str) -> str:
-        """
-        Извлекает x-token из HTML страницы
-        """
-        import re
 
-        # Паттерны для поиска токена в JavaScript
-        patterns = [
-            r'"x-token":\s*"([^"]+)"',
-            r'x-token["\']:\s*["\']([^"\']+)["\']',
-            r'X_TOKEN["\']?\s*=\s*["\']([^"\']+)["\']',
-            r'requestId["\']?\s*=\s*["\']([^"\']+)["\']',
-            r'window\.requestId\s*=\s*["\']([^"\']+)["\']',
-            r'data-token="([^"]+)"',
-            r'token:\s*["\']([^"\']+)["\']'
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, html_content, re.IGNORECASE)
-            if match:
-                token = match.group(1)
-                if len(token) > 10:
-                    return token
-
-        return ""
 
     @staticmethod
     def _generate_request_id() -> str:

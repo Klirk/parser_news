@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # === Настройки парсинга ===
     default_timeout: int = Field(default=30, ge=5, le=300, description="Таймаут по умолчанию")
-    default_count_limit: int = Field(default=50, ge=1, le=1000, description="Лимит офферов по умолчанию")
+    default_count_limit: int = Field(default=1000, ge=1, le=1000, description="Лимит офферов по умолчанию")
     default_sort: str = Field(default="price", description="Сортировка по умолчанию")
 
     # Допустимые сайты для парсинга

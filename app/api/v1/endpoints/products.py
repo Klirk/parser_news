@@ -12,13 +12,13 @@ router = APIRouter()
 async def get_product_offers(
         url: str = Query(..., description="URL страницы товара на hotline.ua"),
         timeout_limit: int = Query(
-            default=5,
+            default=30,
             ge=5,
             le=300,
             description="Таймаут запроса в секундах"
         ),
         count_limit: Optional[int] = Query(
-            default=5,
+            default=1000,
             ge=1,
             le=1000,
             description="Максимальное количество офферов"
@@ -36,7 +36,7 @@ async def get_product_offers(
 
     - **url**: Полный URL страницы товара на hotline.ua
     - **timeout_limit**: Таймаут для HTTP запросов (5-300 секунд)
-    - **count_limit**: Лимит количества офферов (1-100)
+    - **count_limit**: Лимит количества офферов (1-1000)
     - **sort**: Сортировка офферов по цене: desc (по убыванию), asc (по возрастанию)
     """
     if not validators.url(url):
