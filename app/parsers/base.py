@@ -15,11 +15,11 @@ class BaseParser(ABC):
 
     @abstractmethod
     async def parse_product(
-        self,
-        url: str,
-        timeout_limit: int = 30,
-        count_limit: Optional[int] = None,
-        sort_by: str = "price"
+            self,
+            url: str,
+            timeout_limit: int = 30,
+            count_limit: Optional[int] = None,
+            sort_by: str = "price"
     ) -> Product:
         """
 
@@ -61,8 +61,8 @@ class BaseParser(ABC):
     @staticmethod
     def _validate_parameters(
             timeout_limit: int,
-        count_limit: Optional[int],
-        sort_by: str
+            count_limit: Optional[int],
+            sort_by: str
     ) -> None:
         """
         Валидирует входные параметры
@@ -79,8 +79,8 @@ class BaseParser(ABC):
             raise ValueError("timeout_limit должен быть между 5 и 300 секундами")
 
         if count_limit is not None:
-            if not isinstance(count_limit, int) or count_limit < 1 or count_limit > 100:
-                raise ValueError("count_limit должен быть между 1 и 100")
+            if not isinstance(count_limit, int) or count_limit < 1 or count_limit > 1000:
+                raise ValueError("count_limit должен быть между 1 и 1000")
 
         valid_sorts = ["price", "price_desc", "shop", "shop_desc"]
         if sort_by not in valid_sorts:
@@ -94,11 +94,11 @@ class IProductParser(ABC):
 
     @abstractmethod
     async def parse_product(
-        self,
-        url: str,
-        timeout_limit: int = 30,
-        count_limit: Optional[int] = None,
-        sort_by: str = "price"
+            self,
+            url: str,
+            timeout_limit: int = 30,
+            count_limit: Optional[int] = None,
+            sort_by: str = "price"
     ) -> Product:
         """Парсит продукт по URL"""
         pass

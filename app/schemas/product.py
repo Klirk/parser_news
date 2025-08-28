@@ -53,7 +53,7 @@ class ProductParseRequest(BaseModel):
     count_limit: Optional[int] = Field(
         default=None,
         ge=1,
-        le=100,
+        le=1000,
         description="Максимальное количество офферов"
     )
 

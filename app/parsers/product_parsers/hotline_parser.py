@@ -74,10 +74,10 @@ class HotlineParser(BaseParser, IProductParser):
                 url_info = await self._get_url_type_and_token(client, path)
                 if not url_info:
                     raise ValueError(f"Не удалось получить информацию о товаре для path: {path}")
-                
+
                 if url_info['type'] != "product-regular":
                     raise ValueError(f"URL не является страницей товара. Тип: {url_info['type']}")
-                
+
                 x_token = url_info['token']
                 self.logger.info(f"Получен x-token: {x_token[:20]}... (тип: {url_info['type']})")
 
@@ -110,13 +110,13 @@ class HotlineParser(BaseParser, IProductParser):
         """
         try:
             clean_url = url.split('?')[0].split('#')[0]
-            
+
             # Убираем домен и протокол
             if "hotline.ua" in clean_url:
                 # Находим позицию после hotline.ua
                 domain_pos = clean_url.find("hotline.ua") + len("hotline.ua")
                 path_part = clean_url[domain_pos:]
-                
+
                 # Убираем языковые префиксы /ua/, /uk/, /ru/, /en/
                 if path_part.startswith('/ua/'):
                     path_part = path_part[3:]  # Убираем /ua
@@ -126,12 +126,12 @@ class HotlineParser(BaseParser, IProductParser):
                     path_part = path_part[3:]  # Убираем /ru
                 elif path_part.startswith('/en/'):
                     path_part = path_part[3:]  # Убираем /en
-                
+
                 # Проверяем что остался валидный путь
                 if path_part and len(path_part) > 1:
                     self.logger.debug(f"Извлечен path: {path_part} из URL: {url}")
                     return path_part
-            
+
             return None
 
         except Exception as e:
@@ -196,7 +196,7 @@ class HotlineParser(BaseParser, IProductParser):
         # Для getOffers используем только имя товара (последний сегмент path)
         # Например, из "/sport-ryukzaki/ar/" берем "ar"
         product_path = path.strip('/').split('/')[-1] if path else ""
-        
+
         variables = {
             "path": product_path,
             "cityId": 370
@@ -506,63 +506,61 @@ class HotlineParser(BaseParser, IProductParser):
           }
         }
         """
-        
+
         variables = {
             "path": path
         }
-        
+
         payload = {
             "operationName": "urlTypeDefiner",
             "variables": variables,
             "query": query
         }
-        
+
         try:
             self.logger.info(f"Получаем x-token через urlTypeDefiner для path: {path}")
             self.logger.debug(f"urlTypeDefiner payload: {payload}")
-            
+
             response = await client.post(
                 self.graphql_url,
                 json=payload,
                 headers=self.session_headers
             )
-            
+
             if response.status_code != 200:
                 self.logger.error(f"urlTypeDefiner запрос вернул статус {response.status_code}: {response.text}")
                 return None
-            
+
             data = response.json()
-            
+
             if "errors" in data:
                 self.logger.error(f"urlTypeDefiner ошибки: {data['errors']}")
                 return None
-            
+
             try:
                 url_definer = data["data"]["urlTypeDefiner"]
                 if not url_definer:
                     self.logger.warning(f"urlTypeDefiner не вернул данные для path: {path}")
                     return None
-                
+
                 result = {
                     'token': url_definer.get('token', ''),
                     'type': url_definer.get('type', ''),
                     'state': url_definer.get('state', ''),
                     'redirectTo': url_definer.get('redirectTo', '')
                 }
-                
+
                 self.logger.info(f"urlTypeDefiner результат: type={result['type']}, state={result['state']}")
                 return result
-                
+
             except (KeyError, TypeError) as e:
                 self.logger.error(f"Ошибка парсинга ответа urlTypeDefiner: {str(e)}")
                 self.logger.debug(f"Ответ urlTypeDefiner: {data}")
                 return None
-                
+
         except Exception as e:
             self.logger.error(f"Ошибка выполнения urlTypeDefiner запроса: {str(e)}")
             return None
-
-
 
     @staticmethod
     def _generate_request_id() -> str:
