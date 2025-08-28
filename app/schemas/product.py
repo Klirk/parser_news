@@ -57,7 +57,6 @@ class ProductParseRequest(BaseModel):
         description="Максимальное количество офферов"
     )
 
-    @classmethod
     @field_validator('url')
     def validate_url(cls, v: str) -> str:
         if not v.startswith('https://'):
