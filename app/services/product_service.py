@@ -21,11 +21,11 @@ class ProductService:
         self.hotline_parser = HotlineParser()
 
     async def parse_and_save_product(
-        self,
-        url: str,
-        timeout_limit: int = 30,
-        count_limit: Optional[int] = None,
-        sort_by: str = "price"
+            self,
+            url: str,
+            timeout_limit: int = 30,
+            count_limit: Optional[int] = None,
+            sort_by: str = "price"
     ) -> Product:
         """
         Парсит продукт и сохраняет его в базе данных
@@ -67,14 +67,14 @@ class ProductService:
                 raise ValueError(f"Парсер для данного URL не найден: {url}")
 
             await self.repository.save_product(product)
-            
+
             self.logger.info(
                 f"Продукт успешно спарсен и сохранен: {url}, "
                 f"найдено {len(product.offers)} офферов"
             )
-            
+
             return product
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка обработки продукта {url}: {str(e)}")
             raise
@@ -96,12 +96,12 @@ class ProductService:
             return None
 
     async def get_or_parse_product(
-        self,
-        url: str,
-        timeout_limit: int = 30,
-        count_limit: Optional[int] = None,
-        sort_by: str = "price",
-        force_refresh: bool = False
+            self,
+            url: str,
+            timeout_limit: int = 30,
+            count_limit: Optional[int] = None,
+            sort_by: str = "price",
+            force_refresh: bool = False
     ) -> Product:
         """
         Получает продукт из кэша или парсит заново
@@ -130,7 +130,7 @@ class ProductService:
                 count_limit=count_limit,
                 sort_by=sort_by
             )
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка получения/парсинга продукта {url}: {str(e)}")
             raise
@@ -209,7 +209,7 @@ class ProductService:
 
         cache_age = datetime.now(UTC) - product.parsed_at
         max_age_minutes = self.settings.cache_ttl_minutes
-        
+
         return cache_age.total_seconds() < (max_age_minutes * 60)
 
     async def refresh_product_cache(self, url: str) -> Optional[Product]:

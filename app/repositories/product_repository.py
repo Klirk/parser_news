@@ -50,7 +50,7 @@ class ProductRepository:
                 product_dict,
                 upsert=True
             )
-            
+
             if result.upserted_id:
                 self.logger.info(f"Создан новый продукт: {product.url}")
                 return str(result.upserted_id)
@@ -61,7 +61,7 @@ class ProductRepository:
             else:
                 self.logger.warning(f"Продукт не был изменен: {product.url}")
                 return None
-                
+
         except Exception as e:
             self.logger.error(f"Ошибка сохранения продукта {product.url}: {str(e)}")
             raise
@@ -78,24 +78,24 @@ class ProductRepository:
         """
         try:
             collection = await self._get_collection()
-            
+
             document = await collection.find_one({"url": url})
-            
+
             if document:
                 document.pop('_id', None)
                 return Product.model_validate(document)
-                
+
             return None
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка получения продукта {url}: {str(e)}")
             return None
 
     async def get_products_by_date_range(
-        self, 
-        start_date: datetime, 
-        end_date: datetime,
-        limit: int = 100
+            self,
+            start_date: datetime,
+            end_date: datetime,
+            limit: int = 100
     ) -> List[Product]:
         """
         Получает продукты в заданном диапазоне дат
@@ -110,14 +110,14 @@ class ProductRepository:
         """
         try:
             collection = await self._get_collection()
-            
+
             cursor = collection.find({
                 "parsed_at": {
                     "$gte": start_date,
                     "$lte": end_date
                 }
             }).sort("parsed_at", -1).limit(limit)
-            
+
             products = []
             async for document in cursor:
                 document.pop('_id', None)
@@ -127,9 +127,9 @@ class ProductRepository:
                 except Exception as e:
                     self.logger.warning(f"Ошибка валидации продукта: {str(e)}")
                     continue
-                    
+
             return products
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка получения продуктов по датам: {str(e)}")
             return []
@@ -147,7 +147,7 @@ class ProductRepository:
         """
         start_date = datetime.now(UTC) - timedelta(hours=hours)
         end_date = datetime.now(UTC)
-        
+
         return await self.get_products_by_date_range(start_date, end_date, limit)
 
     async def delete_product_by_url(self, url: str) -> bool:
@@ -162,16 +162,16 @@ class ProductRepository:
         """
         try:
             collection = await self._get_collection()
-            
+
             result = await collection.delete_one({"url": url})
-            
+
             if result.deleted_count > 0:
                 self.logger.info(f"Удален продукт: {url}")
                 return True
             else:
                 self.logger.warning(f"Продукт не найден для удаления: {url}")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"Ошибка удаления продукта {url}: {str(e)}")
             return False
@@ -192,7 +192,7 @@ class ProductRepository:
             recent_count = await collection.count_documents({
                 "parsed_at": {"$gte": last_24h}
             })
-            
+
             # Среднее количество офферов
             pipeline = [
                 {"$group": {
@@ -202,10 +202,10 @@ class ProductRepository:
                     "min_offers": {"$min": "$total_offers"}
                 }}
             ]
-            
+
             agg_result = await collection.aggregate(pipeline).to_list(1)
             stats = agg_result[0] if agg_result else {}
-            
+
             return {
                 "total_products": total_count,
                 "recent_products_24h": recent_count,
@@ -213,7 +213,7 @@ class ProductRepository:
                 "max_offers_per_product": stats.get("max_offers", 0),
                 "min_offers_per_product": stats.get("min_offers", 0)
             }
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка получения статистики: {str(e)}")
             return {}
@@ -230,19 +230,19 @@ class ProductRepository:
         """
         try:
             collection = await self._get_collection()
-            
+
             cutoff_date = datetime.now(UTC) - timedelta(days=days)
-            
+
             result = await collection.delete_many({
                 "parsed_at": {"$lt": cutoff_date}
             })
-            
+
             deleted_count = result.deleted_count
             if deleted_count > 0:
                 self.logger.info(f"Удалено {deleted_count} старых продуктов (старше {days} дней)")
-            
+
             return deleted_count
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка очистки старых продуктов: {str(e)}")
             return 0

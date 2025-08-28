@@ -8,6 +8,7 @@ from app.middleware.auth import optional_api_key
 
 router = APIRouter()
 
+
 @router.get("/offers", response_model=ProductResponse)
 async def get_product_offers(
         url: str = Query(..., description="URL страницы товара на hotline.ua"),
@@ -28,7 +29,7 @@ async def get_product_offers(
             pattern="^(desc|asc)$",
             description="Сортировка офферов по цене: desc (по убыванию), asc (по возрастанию)"
         ),
-        product_service = Depends(get_product_service),
+        product_service=Depends(get_product_service),
         user_info: Optional[dict] = Depends(optional_api_key)
 ):
     """
@@ -54,7 +55,7 @@ async def get_product_offers(
     try:
         # Преобразуем параметр sort в формат, понятный сервису
         sort_by = "price_desc" if sort == "desc" else "price"
-        
+
         product = await product_service.parse_and_save_product(
             url=url,
             timeout_limit=timeout_limit,

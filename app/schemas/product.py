@@ -65,6 +65,7 @@ class ProductParseRequest(BaseModel):
             raise ValueError('URL должен быть с сайта hotline.ua')
         return v
 
+
 class ErrorResponse(BaseModel):
     """Универсальная схема ответа для ошибок"""
     detail: str = Field(..., description="Описание ошибки")
