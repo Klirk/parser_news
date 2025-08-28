@@ -5,7 +5,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - MONGODB_URL=mongodb://mongo:27017
+      - MONGODB_URL=mongodb://admin:password123@mongo:27017/parser_db?authSource=admin
       - DATABASE_NAME=parser_db
     depends_on:
       - mongo
