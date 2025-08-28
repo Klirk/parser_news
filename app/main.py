@@ -2,7 +2,6 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from app.config import get_settings, setup_logging
 from app.database import init_db, close_db
@@ -16,24 +15,23 @@ async def lifespan(_app: FastAPI):
     Обработка жизненного цикла приложения
     """
     settings = get_settings()
-    
+
     # Настройка логирования
     setup_logging(settings)
     logger = logging.getLogger(__name__)
-    
+
     try:
         # Инициализация базы данных
         logger.info("Инициализация подключения к базе данных...")
         await init_db()
         logger.info("База данных инициализирована успешно")
-        
+
         yield
-        
+
     except Exception as e:
         logger.error(f"Ошибка инициализации приложения: {str(e)}")
         raise
     finally:
-        # Закрытие подключений
         logger.info("Закрытие подключений...")
         await close_db()
         logger.info("Приложение завершено")
@@ -44,8 +42,8 @@ def create_app() -> FastAPI:
     Фабрика для создания экземпляра FastAPI приложения
     """
     settings = get_settings()
-    
-    app = FastAPI(
+
+    fastapi_app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
         description="Асинхронный сервис для парсинга продуктов и новостей",
@@ -54,34 +52,30 @@ def create_app() -> FastAPI:
         docs_url="/docs" if not settings.environment == "production" else None,
         redoc_url="/redoc" if not settings.environment == "production" else None,
     )
-    
-    # Настройка CORS
-    app.add_middleware(
+
+    fastapi_app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=settings.cors_methods,
         allow_headers=["*"],
     )
-    
-    # Подключение роутеров
-    app.include_router(
+
+    fastapi_app.include_router(
         products.router,
         prefix=f"{settings.api_prefix}/product",
         tags=["products"]
     )
-    
-    app.include_router(
+
+    fastapi_app.include_router(
         news.router,
         prefix=f"{settings.api_prefix}/news",
         tags=["news"]
     )
-    
-    # Настройка обработчиков ошибок
-    setup_error_handlers(app)
-    
-    # Базовые эндпоинты
-    @app.get("/")
+
+    setup_error_handlers(fastapi_app)
+
+    @fastapi_app.get("/")
     async def root():
         """Корневой эндпоинт"""
         return {
@@ -89,38 +83,37 @@ def create_app() -> FastAPI:
             "version": settings.app_version,
             "environment": settings.environment
         }
-    
-    @app.get("/health")
+
+    @fastapi_app.get("/health")
     async def health_check():
         """Проверка здоровья приложения"""
         from app.database import db_manager
-        
+
         db_status = await db_manager.health_check()
-        
+
         return {
             "status": "ok",
             "version": settings.app_version,
             "environment": settings.environment,
             "database": db_status
         }
-    
-    return app
+
+    return fastapi_app
 
 
 # Создание экземпляра приложения
 app = create_app()
 
-
 if __name__ == "__main__":
     import uvicorn
-    
-    settings = get_settings()
-    
+
+    app_settings = get_settings()
+
     uvicorn.run(
         "app.main:app",
-        host=settings.api_host,
-        port=settings.api_port,
-        reload=settings.debug,
-        log_level=settings.log_level.lower(),
+        host=app_settings.api_host,
+        port=app_settings.api_port,
+        reload=app_settings.debug,
+        log_level=app_settings.log_level.lower(),
         access_log=True,
     )

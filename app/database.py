@@ -44,10 +44,10 @@ class DatabaseManager:
                     self.settings.mongodb_url,
                     serverSelectionTimeoutMS=5000,  # 5 секунд таймаут
                     connectTimeoutMS=10000,  # 10 секунд таймаут подключения
-                    socketTimeoutMS=20000,   # 20 секунд таймаут сокета
-                    maxPoolSize=100,         # Максимум 100 подключений в пуле
-                    minPoolSize=10,          # Минимум 10 подключений в пуле
-                    maxIdleTimeMS=30000,     # 30 секунд перед закрытием неактивного соединения
+                    socketTimeoutMS=20000,  # 20 секунд таймаут сокета
+                    maxPoolSize=100,  # Максимум 100 подключений в пуле
+                    minPoolSize=10,  # Минимум 10 подключений в пуле
+                    maxIdleTimeMS=30000,  # 30 секунд перед закрытием неактивного соединения
                     **auth_params
                 )
 

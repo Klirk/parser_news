@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # === Настройки парсинга ===
     default_timeout: int = Field(default=30, ge=5, le=300, description="Таймаут по умолчанию")
-    default_count_limit: int = Field(default=50, ge=1, le=100, description="Лимит офферов по умолчанию")
+    default_count_limit: int = Field(default=50, ge=1, le=1000, description="Лимит офферов по умолчанию")
     default_sort: str = Field(default="price", description="Сортировка по умолчанию")
 
     # Допустимые сайты для парсинга
@@ -92,7 +92,6 @@ class Settings(BaseSettings):
     )
 
     @field_validator('environment')
-    @classmethod
     def validate_environment(cls, v):
         allowed = ['development', 'staging', 'production']
         if v not in allowed:
@@ -100,7 +99,6 @@ class Settings(BaseSettings):
         return v
 
     @field_validator('log_level')
-    @classmethod
     def validate_log_level(cls, v):
         levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         if v.upper() not in levels:
@@ -108,7 +106,6 @@ class Settings(BaseSettings):
         return v.upper()
 
     @field_validator('default_sort')
-    @classmethod
     def validate_default_sort(cls, v):
         allowed = ['price', 'price_desc', 'shop', 'shop_desc']
         if v not in allowed:
@@ -116,7 +113,6 @@ class Settings(BaseSettings):
         return v
 
     @field_validator('mongodb_url')
-    @classmethod
     def validate_mongodb_url(cls, v):
         if not v.startswith(('mongodb://', 'mongodb+srv://')):
             raise ValueError('mongodb_url должен начинаться с mongodb:// или mongodb+srv://')
