@@ -6,7 +6,7 @@ import logging
 
 from app.services.news_service import get_news_service
 from app.schemas.news import NewsCollectionResponse
-from app.middleware.auth import require_api_key, require_read_permission
+from app.middleware.auth import require_read_permission
 
 router = APIRouter()
 
