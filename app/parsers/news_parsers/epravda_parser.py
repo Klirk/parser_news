@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 import re
 import logging
+import asyncio
 from urllib.parse import urlparse
 
 from app.parsers.news_parsers.base_news_parser import BaseNewsParser
@@ -20,6 +21,9 @@ class EpravdaNewsParser(BaseNewsParser):
         self.base_url = "https://epravda.com.ua"
         self.news_url = "https://epravda.com.ua/news"
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.page_semaphore = asyncio.Semaphore(5)
+        self.article_semaphore = asyncio.Semaphore(10)
 
     async def parse_news(
             self,
@@ -48,40 +52,11 @@ class EpravdaNewsParser(BaseNewsParser):
             self.logger.info(f"Парсим от {start_date} до {end_date}")
 
             date_urls = self._generate_date_urls(start_date, end_date)
-            self.logger.info(f"Сгенерировано {date_urls}")
+            self.logger.info(f"Сгенерировано {len(date_urls)} URL-ов для дат")
 
-            all_articles = []
-            processed_dates = 0
-
-            for date_url in date_urls:
-                processed_dates += 1
-                self.logger.info(f"Обрабатываем {processed_dates}/{len(date_urls)} - {date_url}")
-
-                try:
-                    content = await self._get_content(date_url, client)
-                    if not content:
-                        self.logger.warning(f"ПАГИНАЦИЯ: Не удалось получить контент для {date_url}")
-                        continue
-
-                    page_date = self._extract_date_from_date_url(date_url)
-                    self.logger.info(f"ПАГИНАЦИЯ: Обрабатываем дату {page_date}")
-
-                    page_articles = self._extract_articles_with_titles(content, self.base_url, page_date)
-                    self.logger.info(f"ПАГИНАЦИЯ: Найдено {len(page_articles)} статей на странице {date_url}")
-
-                    if page_articles:
-                        all_articles.extend(page_articles)
-                        self.logger.info(
-                            f"ПАГИНАЦИЯ: Добавлено {len(page_articles)} статей, всего: {len(all_articles)}")
-                    else:
-                        self.logger.warning(f"ПАГИНАЦИЯ: На странице {date_url} статьи не найдены")
-
-                except Exception as e:
-                    self.logger.error(f"ПАГИНАЦИЯ: Ошибка обработки страницы {date_url}: {str(e)}")
-                    continue
-
-            self.logger.info(
-                f"ПАГИНАЦИЯ: Завершено. Обработано {processed_dates} страниц, найдено {len(all_articles)} статей")
+            all_articles = await self._fetch_all_date_pages_async(date_urls, client)
+            
+            self.logger.info(f"ASYNC: Завершено. Найдено {len(all_articles)} статей со всех страниц")
 
             unique_articles = []
             seen_urls = set()
@@ -93,52 +68,7 @@ class EpravdaNewsParser(BaseNewsParser):
             self.logger.info(
                 f"ДЕДУПЛИКАЦИЯ: После удаления дубликатов осталось {len(unique_articles)} уникальных статей")
 
-            news_items = []
-            for article in unique_articles:
-                should_parse_full = self._should_parse_full_content(url, article['url'])
-
-                if should_parse_full:
-                    self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Парсим полный контент для {article['url']}")
-                    full_article_data = await self._parse_full_article(article['url'], client)
-                    if full_article_data:
-                        full_article_data.published_at = article.get('datetime')
-                        article_data = full_article_data
-                    else:
-                        # Fallback на базовые данные
-                        article_data = ArticleData(
-                            title=article.get('title', 'Новость без заголовка'),
-                            content_body="",
-                            published_at=article.get('datetime'),
-                            author=None,
-                            views=None,
-                            comments=[],
-                            likes=None,
-                            dislikes=None,
-                            video_url=None,
-                            image_urls=[]
-                        )
-                else:
-                    article_data = ArticleData(
-                        title=article.get('title', 'Новость без заголовка'),
-                        content_body="",
-                        published_at=article.get('datetime'),
-                        author=None,
-                        views=None,
-                        comments=[],
-                        likes=None,
-                        dislikes=None,
-                        video_url=None,
-                        image_urls=[]
-                    )
-
-                news_item = NewsItem(
-                    source=url,
-                    url=article['url'],
-                    article_data=article_data
-                )
-
-                if until_date is None or self._is_date_valid(article.get('datetime'), until_date):
-                    news_items.append(news_item)
+            news_items = await self._process_articles_async(unique_articles, url, client, until_date)
 
             self.logger.info(f"ИТОГО: Создано {len(news_items)} объектов новостей")
 
@@ -177,7 +107,6 @@ class EpravdaNewsParser(BaseNewsParser):
         self.logger.info(f"ГЕНЕРАЦИЯ URL: Создаем URL-ы от {start_date} до {end_date}")
 
         while current_date >= end_date:
-            # Формат даты: DDMMYYYY
             date_str = current_date.strftime("%d%m%Y")
             date_url = f"{self.news_url}/date_{date_str}/"
             urls.append(date_url)
@@ -188,6 +117,221 @@ class EpravdaNewsParser(BaseNewsParser):
 
         self.logger.info(f"ГЕНЕРАЦИЯ URL: Сгенерировано {len(urls)} URL-ов")
         return urls
+
+    async def _fetch_all_date_pages_async(self, date_urls: List[str], client: str) -> List[dict]:
+        """
+        Асинхронно получает контент всех страниц с датами и извлекает статьи
+        
+        Args:
+            date_urls: Список URL страниц с датами
+            client: Тип клиента
+            
+        Returns:
+            List[dict]: Объединенный список всех статей
+        """
+        self.logger.info(f"ASYNC PAGES: Начинаем параллельное получение {len(date_urls)} страниц")
+
+        tasks = [self._fetch_single_date_page(date_url, client) for date_url in date_urls]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        all_articles = []
+        successful_pages = 0
+        
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(f"ASYNC PAGES: Ошибка загрузки страницы {date_urls[i]}: {str(result)}")
+            elif result:
+                all_articles.extend(result)
+                successful_pages += 1
+                self.logger.info(f"ASYNC PAGES: Страница {date_urls[i]} - найдено {len(result)} статей")
+        
+        self.logger.info(f"ASYNC PAGES: Завершено. Успешно обработано {successful_pages}/{len(date_urls)} страниц")
+        return all_articles
+
+    async def _fetch_single_date_page(self, date_url: str, client: str) -> List[dict]:
+        """
+        Получает контент одной страницы с датой и извлекает статьи
+        
+        Args:
+            date_url: URL страницы с датой
+            client: Тип клиента
+            
+        Returns:
+            List[dict]: Список статей со страницы
+        """
+        async with self.page_semaphore:
+            try:
+                self.logger.debug(f"ASYNC PAGES: Загружаем {date_url}")
+                
+                content = await self._get_content(date_url, client)
+                if not content:
+                    self.logger.warning(f"ASYNC PAGES: Не удалось получить контент для {date_url}")
+                    return []
+
+                page_date = self._extract_date_from_date_url(date_url)
+                page_articles = self._extract_articles_with_titles(content, self.base_url, page_date)
+                
+                self.logger.debug(f"ASYNC PAGES: {date_url} - извлечено {len(page_articles)} статей")
+                return page_articles
+                
+            except Exception as e:
+                self.logger.error(f"ASYNC PAGES: Ошибка обработки страницы {date_url}: {str(e)}")
+                return []
+
+    async def _process_articles_async(self, articles: List[dict], source_url: str, client: str, until_date: Optional[datetime]) -> List[NewsItem]:
+        """
+        Асинхронно обрабатывает статьи (парсит полный контент для подходящих)
+        
+        Args:
+            articles: Список словарей статей
+            source_url: URL источника
+            client: Тип клиента
+            until_date: Граничная дата
+            
+        Returns:
+            List[NewsItem]: Список обработанных новостных объектов
+        """
+        if not articles:
+            return []
+        
+        self.logger.info(f"ASYNC ARTICLES: Начинаем обработку {len(articles)} статей")
+
+        full_parse_articles = []
+        simple_articles = []
+        
+        for article in articles:
+            if self._should_parse_full_content(source_url, article['url']):
+                full_parse_articles.append(article)
+            else:
+                simple_articles.append(article)
+        
+        self.logger.info(f"ASYNC ARTICLES: Полный парсинг для {len(full_parse_articles)} статей, простой для {len(simple_articles)}")
+
+        simple_news_items = []
+        for article in simple_articles:
+            article_data = self._create_simple_article_data(article)
+            if until_date is None or self._is_date_valid(article.get('datetime'), until_date):
+                news_item = NewsItem(
+                    source=source_url,
+                    url=article['url'],
+                    article_data=article_data
+                )
+                simple_news_items.append(news_item)
+
+        full_news_items = []
+        if full_parse_articles:
+            batch_size = 20
+            for i in range(0, len(full_parse_articles), batch_size):
+                batch = full_parse_articles[i:i + batch_size]
+                batch_num = i // batch_size + 1
+                total_batches = (len(full_parse_articles) + batch_size - 1) // batch_size
+                
+                self.logger.info(f"ASYNC ARTICLES: Обрабатываем батч {batch_num}/{total_batches} ({len(batch)} статей)")
+                
+                batch_results = await self._process_articles_batch(batch, source_url, client, until_date)
+                full_news_items.extend(batch_results)
+        
+        all_news_items = simple_news_items + full_news_items
+        self.logger.info(f"ASYNC ARTICLES: Завершено. Создано {len(all_news_items)} объектов новостей")
+        
+        return all_news_items
+
+    async def _process_articles_batch(self, articles_batch: List[dict], source_url: str, client: str, until_date: Optional[datetime]) -> List[NewsItem]:
+        """
+        Асинхронно обрабатывает батч статей
+        
+        Args:
+            articles_batch: Батч статей для обработки
+            source_url: URL источника
+            client: Тип клиента
+            until_date: Граничная дата
+            
+        Returns:
+            List[NewsItem]: Обработанные NewsItem объекты
+        """
+        tasks = [self._process_single_article(article, source_url, client) for article in articles_batch]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        news_items = []
+        successful = 0
+        
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(f"ASYNC ARTICLES: Ошибка парсинга статьи {articles_batch[i]['url']}: {str(result)}")
+                article_data = self._create_simple_article_data(articles_batch[i])
+                news_item = NewsItem(
+                    source=source_url,
+                    url=articles_batch[i]['url'],
+                    article_data=article_data
+                )
+                if until_date is None or self._is_date_valid(articles_batch[i].get('datetime'), until_date):
+                    news_items.append(news_item)
+            elif result:
+                if until_date is None or self._is_date_valid(result.article_data.published_at, until_date):
+                    news_items.append(result)
+                    successful += 1
+        
+        self.logger.info(f"ASYNC ARTICLES: Батч завершен. Успешно: {successful}/{len(articles_batch)}")
+        return news_items
+
+    async def _process_single_article(self, article: dict, source_url: str, client: str) -> Optional[NewsItem]:
+        """
+        Асинхронно обрабатывает одну статью с полным парсингом
+        
+        Args:
+            article: Словарь с данными статьи
+            source_url: URL источника
+            client: Тип клиента
+            
+        Returns:
+            Optional[NewsItem]: NewsItem объект или None при ошибке
+        """
+        async with self.article_semaphore:
+            try:
+                self.logger.debug(f"ASYNC ARTICLES: Парсим {article['url']}")
+                
+                full_article_data = await self._parse_full_article(article['url'], client)
+                if full_article_data:
+                    full_article_data.published_at = article.get('datetime')
+                    
+                    news_item = NewsItem(
+                        source=source_url,
+                        url=article['url'],
+                        article_data=full_article_data
+                    )
+                    return news_item
+                else:
+                    self.logger.warning(f"ASYNC ARTICLES: Не удалось спарсить {article['url']}, используем базовые данные")
+                    return None
+                    
+            except Exception as e:
+                self.logger.error(f"ASYNC ARTICLES: Ошибка обработки статьи {article['url']}: {str(e)}")
+                return None
+
+    def _create_simple_article_data(self, article: dict) -> ArticleData:
+        """
+        Создает простые данные статьи без полного контента
+        
+        Args:
+            article: Словарь с данными статьи
+            
+        Returns:
+            ArticleData: Базовые данные статьи
+        """
+        return ArticleData(
+            title=article.get('title', 'Новость без заголовка'),
+            content_body="",
+            published_at=article.get('datetime'),
+            author=None,
+            views=None,
+            comments=[],
+            likes=None,
+            dislikes=None,
+            video_url=None,
+            image_urls=[]
+        )
 
     def _extract_date_from_date_url(self, url: str) -> Optional[datetime]:
         """
@@ -286,61 +430,6 @@ class EpravdaNewsParser(BaseNewsParser):
             self.logger.error(f"ИЗВЛЕЧЕНИЕ: Критическая ошибка извлечения статей: {str(e)}")
             return []
 
-    @staticmethod
-    def _find_news_link_near_time(element) -> Optional:
-        """
-        Ищет ссылку на новость рядом с элементом времени
-        """
-        # Ищем в том же элементе (только если это BeautifulSoup элемент)
-        if hasattr(element, 'find'):
-            link = element.find('a', href=re.compile(r'/[a-z]+/.*-\d{6}/?$'))
-            if link:
-                return link
-
-        if hasattr(element, 'next_sibling'):
-            next_sibling = element.next_sibling
-            attempts = 0
-            while next_sibling and attempts < 5:
-                if hasattr(next_sibling, 'find'):
-                    link = next_sibling.find('a', href=re.compile(r'/[a-z]+/.*-\d{6}/?$'))
-                    if link:
-                        return link
-                next_sibling = next_sibling.next_sibling
-                attempts += 1
-
-        if hasattr(element, 'parent') and element.parent and hasattr(element.parent, 'find'):
-            link = element.parent.find('a', href=re.compile(r'/[a-z]+/.*-\d{6}/?$'))
-            if link:
-                return link
-
-        return None
-
-    @staticmethod
-    def _find_time_near_link(link) -> Optional[str]:
-        """
-        Ищет время рядом со ссылкой
-        """
-        if link.parent and hasattr(link.parent, 'find'):
-            time_element = link.parent.find(string=re.compile(r'\d{1,2}:\d{2}'))
-            if time_element:
-                return time_element.strip()
-
-        prev_sibling = link.parent.previous_sibling if link.parent else None
-        attempts = 0
-        while prev_sibling and attempts < 3:
-            if hasattr(prev_sibling, 'find'):
-                time_element = prev_sibling.find(string=re.compile(r'\d{1,2}:\d{2}'))
-                if time_element:
-                    return time_element.strip()
-            elif isinstance(prev_sibling, str):
-                time_match = re.search(r'\d{1,2}:\d{2}', prev_sibling)
-                if time_match:
-                    return time_match.group()
-            prev_sibling = prev_sibling.previous_sibling
-            attempts += 1
-
-        return None
-
     def _combine_date_and_time(self, page_date: Optional[datetime], time_str: Optional[str]) -> Optional[datetime]:
         """
         Комбинирует дату страницы и время статьи
@@ -372,7 +461,6 @@ class EpravdaNewsParser(BaseNewsParser):
             else:
                 self.logger.warning(f"ВРЕМЯ: Время пустое или None, используем дату страницы")
 
-            # Если время не найдено, используем дату страницы с полуночью
             fallback_dt = page_date.replace(hour=0, minute=0, second=0, microsecond=0)
             self.logger.info(f"ВРЕМЯ: Используем дату страницы: {fallback_dt}")
             return fallback_dt
