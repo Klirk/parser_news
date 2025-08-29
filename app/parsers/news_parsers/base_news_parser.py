@@ -21,11 +21,16 @@ class BaseNewsParser(ABC):
         self.settings = get_settings()
         self.session_headers = {
             'User-Agent': self.settings.user_agent,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8,ru;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
         }
 
     @abstractmethod
@@ -88,17 +93,38 @@ class BaseNewsParser(ABC):
             str: HTML контент или None при ошибке
         """
         try:
+            self.logger.info(f"HTTP: Получаем контент {url}")
+            
             async with httpx.AsyncClient(
                 timeout=timeout,
                 headers=self.session_headers,
                 follow_redirects=True
             ) as client:
                 response = await client.get(url)
+                
+                self.logger.info(f"HTTP: Статус ответа {response.status_code} для {url}")
+                
+                if response.status_code == 403:
+                    self.logger.warning(f"HTTP: Доступ запрещен (403) для {url}. Сайт может блокировать запросы")
+                elif response.status_code == 429:
+                    self.logger.warning(f"HTTP: Слишком много запросов (429) для {url}")
+                elif response.status_code >= 400:
+                    self.logger.warning(f"HTTP: Ошибка {response.status_code} для {url}")
+                
                 response.raise_for_status()
+                content_length = len(response.text)
+                self.logger.info(f"HTTP: Получен контент {content_length} символов для {url}")
+                
                 return response.text
                 
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"HTTP: Ошибка статуса {e.response.status_code} для {url}: {str(e)}")
+            return None
+        except httpx.TimeoutException as e:
+            self.logger.error(f"HTTP: Таймаут запроса для {url}: {str(e)}")
+            return None
         except Exception as e:
-            self.logger.error(f"Ошибка получения контента {url}: {str(e)}")
+            self.logger.error(f"HTTP: Ошибка получения контента {url}: {str(e)}")
             return None
 
     async def _get_content_browser(self, url: str, timeout: int = 30) -> Optional[str]:

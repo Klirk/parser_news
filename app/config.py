@@ -77,7 +77,7 @@ class Settings(BaseSettings):
 
     # === Настройки HTTP клиента ===
     user_agent: str = Field(
-        default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        default="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         description="User-Agent для запросов"
     )
     max_retries: int = Field(default=3, ge=0, le=10, description="Максимум повторов запросов")
