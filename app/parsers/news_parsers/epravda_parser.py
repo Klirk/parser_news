@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 import re
 import logging
+from urllib.parse import urlparse
 
 from app.parsers.news_parsers.base_news_parser import BaseNewsParser
 from app.models.news import NewsCollection, NewsItem, ArticleData
@@ -99,11 +100,30 @@ class EpravdaNewsParser(BaseNewsParser):
             # Создаем объекты новостей
             news_items = []
             for article in unique_articles:
-                article_data = ArticleData(
-                    title=article.get('title', 'Новость без заголовка'),
-                    content_body="",  # Только заголовки и ссылки
-                    published_at=article.get('datetime')
-                )
+                # Проверяем, нужно ли парсить полный контент
+                should_parse_full = self._should_parse_full_content(url, article['url'])
+                
+                if should_parse_full:
+                    self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Парсим полный контент для {article['url']}")
+                    full_article_data = await self._parse_full_article(article['url'], client)
+                    if full_article_data:
+                        # Обновляем данные из полного парсинга, но сохраняем время из списка
+                        full_article_data.published_at = article.get('datetime')
+                        article_data = full_article_data
+                    else:
+                        # Fallback на базовые данные
+                        article_data = ArticleData(
+                            title=article.get('title', 'Новость без заголовка'),
+                            content_body="",
+                            published_at=article.get('datetime')
+                        )
+                else:
+                    # Только заголовки и ссылки
+                    article_data = ArticleData(
+                        title=article.get('title', 'Новость без заголовка'),
+                        content_body="",
+                        published_at=article.get('datetime')
+                    )
                 
                 news_item = NewsItem(
                     source=url,
@@ -372,12 +392,145 @@ class EpravdaNewsParser(BaseNewsParser):
         articles = self._extract_articles_with_titles(content, base_url)
         return [article['url'] for article in articles]
 
+    def _should_parse_full_content(self, source_url: str, article_url: str) -> bool:
+        """
+        Проверяет, нужно ли парсить полный контент статьи
+        Возвращает True если домены source и article совпадают
+        
+        Args:
+            source_url: URL источника (откуда парсим)
+            article_url: URL статьи
+            
+        Returns:
+            bool: True если нужно парсить полный контент
+        """
+        try:
+            source_domain = urlparse(source_url).netloc.lower()
+            article_domain = urlparse(article_url).netloc.lower()
+            
+            # Убираем www. для корректного сравнения
+            source_domain = source_domain.replace('www.', '')
+            article_domain = article_domain.replace('www.', '')
+            
+            should_parse = source_domain == article_domain
+            self.logger.info(f"ПРОВЕРКА ДОМЕНА: {source_domain} == {article_domain} -> {should_parse}")
+            
+            return should_parse
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка проверки доменов {source_url} vs {article_url}: {str(e)}")
+            return False
+
+    async def _parse_full_article(self, url: str, client: str = "http") -> Optional[ArticleData]:
+        """
+        Парсит полный контент статьи с epravda.com.ua
+        
+        Args:
+            url: URL статьи
+            client: Тип клиента
+            
+        Returns:
+            ArticleData: Полные данные статьи или None при ошибке
+        """
+        try:
+            self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Начинаем парсинг статьи {url}")
+            
+            content = await self._get_content(url, client)
+            if not content:
+                self.logger.warning(f"ПОЛНЫЙ ПАРСИНГ: Не удалось получить контент для {url}")
+                return None
+                
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # Ищем основную статью
+            article_element = soup.find('article', class_='post_news')
+            if not article_element:
+                self.logger.warning(f"ПОЛНЫЙ ПАРСИНГ: Не найден элемент article.post_news в {url}")
+                return None
+            
+            # Извлекаем заголовок
+            title = ""
+            title_element = article_element.find('h1', class_='post_news_title')
+            if title_element:
+                title = self._clean_text(title_element.get_text())
+                self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Найден заголовок: {title[:50]}...")
+            
+            # Извлекаем автора
+            author = None
+            author_element = article_element.find('span', class_='post_news_author')
+            if author_element:
+                author_link = author_element.find('a')
+                if author_link:
+                    author = self._clean_text(author_link.get_text())
+                    self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Найден автор: {author}")
+            
+            # Извлекаем основной текст статьи
+            content_body = ""
+            text_element = article_element.find('div', class_='post_news_text')
+            if text_element:
+                # Извлекаем все параграфы
+                paragraphs = text_element.find_all(['p', 'li'])
+                content_parts = []
+                for p in paragraphs:
+                    text = self._clean_text(p.get_text())
+                    if text:
+                        content_parts.append(text)
+                content_body = '\n\n'.join(content_parts)
+                self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Извлечен контент ({len(content_body)} символов)")
+            
+            # Извлекаем изображения
+            image_urls = []
+            photo_element = article_element.find('div', class_='post_news_photo')
+            if photo_element:
+                # Ищем изображение в picture/img элементах
+                img_element = photo_element.find('img')
+                if img_element and img_element.get('src'):
+                    img_url = img_element.get('src')
+                    normalized_url = self._normalize_url(img_url, self.base_url)
+                    image_urls.append(normalized_url)
+                    self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Найдено изображение: {normalized_url}")
+            
+            # Извлекаем количество просмотров
+            views = None
+            views_element = article_element.find('div', class_='post_views')
+            if views_element:
+                views_text = views_element.get_text()
+                # Извлекаем число из текста
+                views_match = re.search(r'(\d+)', views_text)
+                if views_match:
+                    views = int(views_match.group(1))
+                    self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Найдено просмотров: {views}")
+            
+            # Извлекаем теги
+            tags = []
+            tags_element = article_element.find('div', class_='post_news_tags')
+            if tags_element:
+                tag_links = tags_element.find_all('a')
+                for tag_link in tag_links:
+                    tag = self._clean_text(tag_link.get_text())
+                    if tag:
+                        tags.append(tag)
+                if tags:
+                    self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Найдены теги: {', '.join(tags)}")
+            
+            self.logger.info(f"ПОЛНЫЙ ПАРСИНГ: Успешно спарсена статья {url}")
+            
+            return ArticleData(
+                title=title or "Статья без заголовка",
+                content_body=content_body,
+                image_urls=image_urls,
+                published_at=datetime.now(timezone.utc),  # Будет перезаписано из списка
+                author=author,
+                views=views,
+                comments=tags  # Используем теги как комментарии для этого примера
+            )
+            
+        except Exception as e:
+            self.logger.error(f"ПОЛНЫЙ ПАРСИНГ: Ошибка парсинга статьи {url}: {str(e)}")
+            return None
+
     async def _parse_article(self, url: str, client: str = "http") -> Optional[ArticleData]:
         """
-        Парсит отдельную статью (базовая реализация для совместимости)
+        Парсит отдельную статью (использует полный парсинг)
         """
-        return ArticleData(
-            title="Статья",
-            content_body="",
-            published_at=datetime.now(timezone.utc)
-        )
+        return await self._parse_full_article(url, client)
