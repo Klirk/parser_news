@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone
 from playwright.async_api import async_playwright
 import re
+import brotli
 
 from app.models.news import NewsCollection, ArticleData
 from app.config import get_settings
@@ -112,10 +113,32 @@ class BaseNewsParser(ABC):
                     self.logger.warning(f"HTTP: Ошибка {response.status_code} для {url}")
                 
                 response.raise_for_status()
-                content_length = len(response.text)
+                
+                # Проверяем тип сжатия и декодируем контент
+                content_encoding = response.headers.get('content-encoding', '').lower()
+                
+                if content_encoding == 'br':
+                    # Brotli сжатие
+                    try:
+                        decompressed_content = brotli.decompress(response.content)
+                        content = decompressed_content.decode('utf-8')
+                        self.logger.info(f"HTTP: Декодирован Brotli-сжатый контент для {url}")
+                    except Exception as e:
+                        self.logger.error(f"HTTP: Ошибка декодирования Brotli для {url}: {str(e)}")
+                        # Fallback к обычному тексту
+                        content = response.text
+                elif content_encoding == 'gzip':
+                    # Gzip сжатие (httpx обычно обрабатывает автоматически)
+                    content = response.text
+                    self.logger.info(f"HTTP: Обработан Gzip-сжатый контент для {url}")
+                else:
+                    # Без сжатия
+                    content = response.text
+                
+                content_length = len(content)
                 self.logger.info(f"HTTP: Получен контент {content_length} символов для {url}")
                 
-                return response.text
+                return content
                 
         except httpx.HTTPStatusError as e:
             self.logger.error(f"HTTP: Ошибка статуса {e.response.status_code} для {url}: {str(e)}")
