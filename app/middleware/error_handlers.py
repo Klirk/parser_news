@@ -3,8 +3,8 @@
 import logging
 import asyncio
 from typing import Union
-from datetime import datetime
-from fastapi import Request, HTTPException
+from datetime import datetime, UTC
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
@@ -27,7 +27,7 @@ async def timeout_error_handler(request: Request, exc: Union[asyncio.TimeoutErro
             "detail": "Превышено время ожидания запроса",
             "error_type": "TimeoutError",
             "status_code": 408,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(UTC).isoformat() + "Z"
         }
     )
 
@@ -49,7 +49,7 @@ async def http_status_error_handler(request: Request, exc: httpx.HTTPStatusError
                 "detail": "Слишком много запросов. Попробуйте позже",
                 "error_type": "RateLimitError", 
                 "status_code": 429,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.now(UTC).isoformat() + "Z"
             }
         )
     elif 500 <= status_code < 600:
@@ -59,7 +59,7 @@ async def http_status_error_handler(request: Request, exc: httpx.HTTPStatusError
                 "detail": "Ошибка внешнего сервиса",
                 "error_type": "ExternalServiceError",
                 "status_code": 502,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.now(UTC).isoformat() + "Z"
             }
         )
     elif 400 <= status_code < 500:
@@ -69,7 +69,7 @@ async def http_status_error_handler(request: Request, exc: httpx.HTTPStatusError
                 "detail": "Ошибка запроса к внешнему сервису",
                 "error_type": "BadRequestError",
                 "status_code": 400,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.now(UTC).isoformat() + "Z"
             }
         )
     else:
@@ -79,7 +79,7 @@ async def http_status_error_handler(request: Request, exc: httpx.HTTPStatusError
                 "detail": "Неожиданная ошибка внешнего сервиса",
                 "error_type": "UnexpectedError",
                 "status_code": 500,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.now(UTC).isoformat() + "Z"
             }
         )
 
