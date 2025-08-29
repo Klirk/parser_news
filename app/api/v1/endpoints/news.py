@@ -16,7 +16,7 @@ async def parse_news(
         url: str = Query(..., description="URL категории новостей"),
         until_date: Optional[datetime] = Query(
             default=None,
-            description="Самая старая дата для парсинга (включительно). Парсинг идет от сегодня назад до этой даты. Например: если сегодня 29.08, а until_date=2025-08-28, то будут собраны статьи за 29.08 и 28.08"
+            description="until_date=2025-08-28"
         ),
         client: str = Query(
             default="http",
