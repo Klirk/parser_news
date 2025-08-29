@@ -102,6 +102,7 @@ class DatabaseManager:
         Создает необходимые индексы для коллекций
         """
         try:
+            # Индексы для коллекции продуктов
             products_collection = self._database.products
 
             # Индекс для поиска по URL (уникальный)
@@ -118,6 +119,34 @@ class DatabaseManager:
                 ("parsed_at", -1),
                 ("total_offers", -1)
             ])
+
+            # Индексы для коллекции новостей
+            news_collection = self._database.news
+
+            # Индекс для поиска по источнику
+            await news_collection.create_index("source")
+
+            # Индекс для поиска по времени парсинга
+            await news_collection.create_index("parsed_at")
+
+            # Индекс для поиска по статусу парсинга
+            await news_collection.create_index("parse_status")
+
+            # Составной индекс для эффективного поиска
+            await news_collection.create_index([
+                ("source", 1),
+                ("parsed_at", -1)
+            ])
+
+            # Текстовый индекс для поиска по содержимому новостей
+            await news_collection.create_index([
+                ("items.article_data.title", "text"),
+                ("items.article_data.content_body", "text"),
+                ("items.article_data.author", "text")
+            ])
+
+            # Индекс для поиска по дате публикации статей
+            await news_collection.create_index("items.article_data.published_at")
 
             self.logger.info("Индексы MongoDB созданы успешно")
 
