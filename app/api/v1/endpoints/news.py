@@ -2,10 +2,11 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
 from datetime import datetime
 import validators
+import logging
 
 from app.services.news_service import get_news_service
 from app.schemas.news import NewsCollectionResponse
-from app.middleware.auth import optional_api_key
+from app.middleware.auth import require_api_key, require_read_permission
 
 router = APIRouter()
 
@@ -24,10 +25,12 @@ async def parse_news(
         ),
 
         news_service=Depends(get_news_service),
-        user_info: Optional[dict] = Depends(optional_api_key)
+        user_info: dict = Depends(require_read_permission)
 ):
     """
     Универсальный парсер новостей для поддерживаемых источников
+    
+    **Требует API ключ в заголовке Authorization: Bearer YOUR_API_KEY**
     
     Поддерживаемые источники:
     - https://epravda.com.ua/news/
@@ -60,6 +63,10 @@ async def parse_news(
         )
 
     try:
+        # Логируем использование API
+        logger = logging.getLogger(__name__)
+        logger.info(f"API запрос: пользователь {user_info.get('name', 'Unknown')} парсит новости с {url}")
+        
         news_collection = await news_service.parse_news(
             url=url,
             until_date=until_date,

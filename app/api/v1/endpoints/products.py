@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
 import validators
+import logging
 
 from app.services.product_service import get_product_service
 from app.schemas.product import ProductResponse
-from app.middleware.auth import optional_api_key
+from app.middleware.auth import require_api_key, require_read_permission
 
 router = APIRouter()
 
@@ -30,15 +31,18 @@ async def get_product_offers(
             description="Сортировка офферов по цене: desc (по убыванию), asc (по возрастанию)"
         ),
         product_service=Depends(get_product_service),
-        user_info: Optional[dict] = Depends(optional_api_key)
+        user_info: dict = Depends(require_read_permission)
 ):
     """
     Получает офферы для товара с hotline.ua используя только API (без HTML парсинга)
+
+    **Требует API ключ в заголовке Authorization: Bearer YOUR_API_KEY**
 
     - **url**: Полный URL страницы товара на hotline.ua
     - **timeout_limit**: Таймаут для HTTP запросов (5-300 секунд)
     - **count_limit**: Лимит количества офферов (1-1000)
     - **sort**: Сортировка офферов по цене: desc (по убыванию), asc (по возрастанию)
+
     """
     if not validators.url(url):
         raise HTTPException(
@@ -53,6 +57,10 @@ async def get_product_offers(
         )
 
     try:
+        # Логируем использование API
+        logger = logging.getLogger(__name__)
+        logger.info(f"API запрос: пользователь {user_info.get('name', 'Unknown')} парсит товар с {url}")
+        
         # Преобразуем параметр sort в формат, понятный сервису
         sort_by = "price_desc" if sort == "desc" else "price"
 
